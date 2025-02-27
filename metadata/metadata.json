@@ -37,7 +37,7 @@
         {
           "name": "filter_rows",
           "type": "filter",
-          "input": "add_fields",
+          "input": "add_date",
           "config": {
             "filter": "sexo != 'Ambos sexos'"
           }
