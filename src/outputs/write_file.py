@@ -1,3 +1,4 @@
+import os
 from logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger()
@@ -13,6 +14,13 @@ class FileWriter:
         mode = self.config["save_mode"]
 
         try:
+            # Convertir la ruta en absoluta si empieza con "/"
+            if path.startswith("/"):
+                path = os.path.abspath(path[1:])
+
+            # Crear directorios si no existen
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
             logger.info(f"Guardando archivo en '{path}' con formato '{fmt}' y modo '{mode}'.")
 
             writer = df.write.format(fmt).mode(mode)
