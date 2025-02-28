@@ -4,16 +4,19 @@ from transformations.filter_rows import FilterTransformation
 from outputs.write_file import FileWriter
 from outputs.write_delta import DeltaWriter
 from logger_manager import LoggerManager
+from metadata_manager import MetadataManager
 
 logger = LoggerManager.get_logger()
 
 
 class DataProcessor:
-    def __init__(self, spark, metadata, variables):
+    def __init__(self, spark):
         self.spark = spark
-        self.metadata = metadata
-        self.variables = variables
         self.dataframes = {}
+
+        # Obtenemos la metadata y el 'year' desde el Singleton
+        self.metadata = MetadataManager.get_metadata()
+        self.year = MetadataManager.get_variable("year")
 
     def run(self):
         try:
@@ -25,7 +28,6 @@ class DataProcessor:
                 self._process_transformations(dataflow["transformations"])
                 self._process_outputs(dataflow["outputs"])
 
-            logger.info("Pipeline finalizado correctamente.")
         except Exception as e:
             logger.error(f"Error crítico en el pipeline: {e}", exc_info=True)
             raise
@@ -100,8 +102,10 @@ class DataProcessor:
 
     def _read_file(self, inp):
         path = inp["config"]["path"]
-        for k, v in self.variables.items():
-            path = path.replace(f"{{{{ {k} }}}}", v)
+
+        # Reemplazamos {{ year }} usando la variable del Singleton
+        if self.year:
+            path = path.replace("{{ year }}", self.year)
 
         if path.startswith("/"):
             path = os.path.abspath(path[1:])

@@ -1,10 +1,10 @@
 import sys
-import json
 import argparse
 from pyspark.sql import SparkSession
 from delta import configure_spark_with_delta_pip
 from data_processor import DataProcessor
 from logger_manager import LoggerManager
+from metadata_manager import MetadataManager
 
 logger = LoggerManager.get_logger()
 
@@ -19,27 +19,24 @@ def main():
 
         logger.info(f"Iniciando pipeline con año: {args.year} y metadata: {args.metadata}")
 
-        # Configuración de Spark con Delta
-        builder = SparkSession.builder \
-            .appName("LocalPipeline") \
-            .master("local[*]") \
-            .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
-            .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
+        # 1) Instanciamos el Singleton con la ruta y la variable 'year'
+        MetadataManager(metadata_path=args.metadata, variables={"year": args.year})
+
+        # 2) Configuración de Spark con Delta
+        builder = (
+            SparkSession.builder
+            .appName("LocalPipeline")
+            .master("local[*]")
+            .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
+            .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
             .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        )
 
         spark = configure_spark_with_delta_pip(builder).getOrCreate()
         logger.info("Sesión de Spark creada exitosamente")
 
-        # Cargar metadata
-        try:
-            with open(args.metadata, "r") as f:
-                metadata = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Error al leer el archivo de metadata: {e}")
-            sys.exit(1)
-
-        # Procesamiento de datos
-        processor = DataProcessor(spark, metadata, {"year": args.year})
+        # 3) Ejecutamos el DataProcessor (sin pasar metadata ni year, ya se obtiene del Singleton)
+        processor = DataProcessor(spark)
         processor.run()
 
         logger.info("Pipeline ejecutado correctamente")
