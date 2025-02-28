@@ -2,8 +2,8 @@ import sys
 import argparse
 from pyspark.sql import SparkSession
 from delta import configure_spark_with_delta_pip
-from data_processor import DataProcessor
-from logger_manager import LoggerManager
+from utils.data_processor import DataProcessor
+from utils.logger_manager import LoggerManager
 from metadata_manager import MetadataManager
 
 logger = LoggerManager.get_logger()

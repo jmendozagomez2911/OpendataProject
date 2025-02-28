@@ -1,6 +1,6 @@
 import json
 import sys
-from logger_manager import LoggerManager
+from utils.logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger()
 

@@ -1,5 +1,5 @@
 import os
-from logger_manager import LoggerManager
+from utils.logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger()
 
