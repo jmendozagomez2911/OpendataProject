@@ -13,3 +13,8 @@ spark-warehouse/
 
 # Archivos de configuración sensibles (sube solo ejemplos)
 .env
+
+# Ignorar logs y archivos transaccionales de Delta Lake
+delta_tables/**/_delta_log/
+delta_tables/**/*.crc
+delta_tables/**/*.parquet
