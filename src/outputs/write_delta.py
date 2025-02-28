@@ -2,7 +2,7 @@ from delta.tables import DeltaTable
 import pyspark.sql.utils
 from pyspark.sql.window import Window
 from pyspark.sql.functions import row_number
-from logger_manager import LoggerManager
+from utils.logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger()
 
