@@ -1,0 +1,20 @@
+# Archivos generados
+*.pyc
+__pycache__/
+*.log
+
+# Entorno virtual (NO se trackea)
+venv/
+
+# Salidas del programa (si son generadas)
+data/output/
+out/
+spark-warehouse/
+
+# Archivos de configuración sensibles (sube solo ejemplos)
+.env
+
+# Ignorar logs y archivos transaccionales de Delta Lake
+delta_tables/**/_delta_log/
+delta_tables/**/*.crc
+delta_tables/**/*.parquet
