@@ -1,5 +1,6 @@
 import pytest
 import os
+import json
 from pyspark.sql import SparkSession
 import pyspark.sql.functions as F
 
@@ -12,12 +13,40 @@ def _get_csv_path_from_metadata(md, year):
         path_template = md["dataflows"][0]["inputs"][0]["config"]["path"]
         path = path_template.replace("{{ year }}", str(year))
 
-        # Asegurarnos de que es la ruta correcta
-        base_dir = os.path.abspath("C:/Projects/OpendataProject/data")  # Base correcta
+        # Usar el Working Directory configurado
+        base_dir = os.getcwd()
         if path.startswith("/data/"):
-            path = os.path.join(base_dir, path[6:])  # Remover "/data/" del inicio
+            path = os.path.join(base_dir, path[1:])  # Remueve la barra inicial
 
         return path
+    except KeyError as e:
+        raise ValueError(f"Error en la estructura de metadata.json: {e}")
+
+def _get_output_path_from_metadata(md, output_name):
+    """
+    Obtiene la ruta de salida desde el metadata.json basado en el nombre del output.
+    """
+    try:
+        for output in md["dataflows"][0]["outputs"]:
+            if output["name"] == output_name:
+                path = output["config"]["path"]
+                base_dir = os.getcwd()
+                if path.startswith("/data/"):
+                    path = os.path.join(base_dir, path[1:])
+                return path
+        raise ValueError(f"No se encontró la ruta de salida para {output_name} en metadata.json")
+    except KeyError as e:
+        raise ValueError(f"Error en la estructura de metadata.json: {e}")
+
+def _get_spark_options_from_metadata(md):
+    """
+    Extrae las opciones de Spark desde el metadata.json
+    """
+    try:
+        options = md["dataflows"][0]["inputs"][0]["spark_options"]
+        delimiter = options.get("delimiter", ",")
+        header = options.get("header", "true").lower() == "true"
+        return delimiter, header
     except KeyError as e:
         raise ValueError(f"Error en la estructura de metadata.json: {e}")
 
@@ -34,9 +63,11 @@ def test_compare_changes(spark, yearStart, yearEnd, metadata):
     """
     path_start = _get_csv_path_from_metadata(metadata, yearStart)
     path_end = _get_csv_path_from_metadata(metadata, yearEnd)
+    output_path = _get_output_path_from_metadata(metadata, "write_last_file")
+    delimiter, header = _get_spark_options_from_metadata(metadata)
 
-    df_start = spark.read.option("header", True).option("delimiter", ";").csv(path_start)
-    df_end = spark.read.option("header", True).option("delimiter", ";").csv(path_end)
+    df_start = spark.read.option("header", header).option("delimiter", delimiter).csv(path_start)
+    df_end = spark.read.option("header", header).option("delimiter", delimiter).csv(path_end)
 
     key_cols = ["provincia", "municipio", "sexo"]  # Sin "edad" porque no está en el CSV
 
@@ -55,13 +86,12 @@ def test_compare_changes(spark, yearStart, yearEnd, metadata):
         .filter(F.col(f"total_{yearStart}") != F.col(f"total_{yearEnd}"))
     )
 
-    output_path = "C:/Projects/OpendataProject/tests/results/changes_2024_2025"
     comparison_df.write.mode("overwrite").parquet(output_path)
 
     count_changes = comparison_df.count()
     print(f"📌 Total de filas con cambios: {count_changes}. Para más detalles, revisar {output_path}")
 
-    # comparison_df.show(500)  # Mostrar las primeras 10 filas en caso de debugging
+    # comparison_df.show(10)  # Mostrar las primeras 10 filas en caso de debugging
 
     assert count_changes > 0, "No se encontraron cambios entre los archivos de 2024 y 2025"
 
@@ -70,7 +100,9 @@ def test_data_quality(spark, yearEnd, metadata):
     Verifica problemas de calidad en el fichero de 2025.
     """
     path_end = _get_csv_path_from_metadata(metadata, yearEnd)
-    df_end = spark.read.option("header", True).option("delimiter", ";").csv(path_end)
+    output_path = _get_output_path_from_metadata(metadata, "write_historic_file")
+    delimiter, header = _get_spark_options_from_metadata(metadata)
+    df_end = spark.read.option("header", header).option("delimiter", delimiter).csv(path_end)
 
     required_cols = {"provincia", "municipio", "sexo", "total"}
     missing_cols = required_cols - set(df_end.columns)
@@ -86,12 +118,11 @@ def test_data_quality(spark, yearEnd, metadata):
 
     quality_issues_df = df_end.filter(F.col("Ambos_sexos") != F.col("total"))
 
-    output_path = "C:/Projects/OpendataProject/tests/results/data_quality_2025"
     quality_issues_df.write.mode("overwrite").parquet(output_path)
 
     count_quality_issues = quality_issues_df.count()
     print(f"📌 Total de problemas de calidad: {count_quality_issues}. Para más detalles, revisar {output_path}")
 
-    # quality_issues_df.show(500)  # Mostrar las primeras 10 filas en caso de debugging
+    # quality_issues_df.show(10)  # Mostrar las primeras 10 filas en caso de debugging
 
     assert count_quality_issues == 0, "Se encontraron problemas de calidad en 2025"
