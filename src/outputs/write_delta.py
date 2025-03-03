@@ -15,7 +15,7 @@ class DeltaWriter:
         self.config = config
         self.table_name = self.config["table"]
         self.delta_path = f"delta_tables/{self.table_name}"
-        self.primary_key = self.config.get("primary_key", None)  # 🔹 Evita KeyError si no está definido
+        self.primary_key = self.config.get("primary_key", None)
 
     def write(self, df):
         """Escribe datos en Delta Lake según el modo de guardado."""
@@ -100,7 +100,6 @@ class DeltaWriter:
 
         if num_files > ZORDER_FILE_THRESHOLD:
             self.spark.sql(f"OPTIMIZE '{self.delta_path}' ZORDER BY ({', '.join(self.primary_key)})")
-            logger.info(f"ZORDER aplicado en '{self.delta_path}' porque tiene más de {ZORDER_FILE_THRESHOLD} archivos.")
+            logger.info(f"ZORDER aplicado en '{self.delta_path}' (más de {ZORDER_FILE_THRESHOLD} archivos).")
         else:
-            logger.info(
-                f"ZORDER omitido en '{self.delta_path}' porque tiene menos de {ZORDER_FILE_THRESHOLD} archivos.")
+            logger.info(f"ZORDER omitido en '{self.delta_path}' (menos de {ZORDER_FILE_THRESHOLD} archivos).")

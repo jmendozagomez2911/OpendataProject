@@ -12,24 +12,13 @@ class FileWriter:
         path = self.config["path"]
         fmt = self.config["format"]
         mode = self.config["save_mode"]
-
+        if path.startswith("/"):
+            path = os.path.abspath(path[1:])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        logger.info(f"Guardando archivo en '{path}', formato: {fmt}, modo: {mode}")
         try:
-            # Convertir la ruta en absoluta si empieza con "/"
-            if path.startswith("/"):
-                path = os.path.abspath(path[1:])
-
-            # Crear directorios si no existen
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            logger.info(f"Guardando archivo en '{path}' con formato '{fmt}' y modo '{mode}'.")
-
-            writer = df.write.format(fmt).mode(mode)
-            partition_col = self.config.get("partition")
-            if partition_col:
-                writer = writer.partitionBy(partition_col)
-
-            writer.save(path)
-            logger.info(f"Archivo guardado exitosamente en '{path}'.")
+            df.coalesce(1).write.format(fmt).mode(mode).save(path)
+            logger.info(f"Archivo guardado en '{path}'")
         except Exception as e:
-            logger.error(f"Error al escribir archivo en '{path}': {e}", exc_info=True)
+            logger.error(f"Error al guardar archivo en '{path}': {e}", exc_info=True)
             raise

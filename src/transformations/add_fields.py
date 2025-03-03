@@ -6,8 +6,8 @@ class AddFieldsTransformation:
         self.config = config
 
     def transform(self, df):
-        for field in self.config["fields"]:
+        for field in self.config.get("fields", []):
             field_name = field["name"]
-            expression = field["expression"]
-            df = df.withColumn(field_name, F.expr(expression))
+            expr = field["expression"]
+            df = df.withColumn(field_name, F.expr(expr))
         return df
