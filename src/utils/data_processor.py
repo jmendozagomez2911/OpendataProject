@@ -1,5 +1,6 @@
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from utils.logger_manager import LoggerManager
 from metadata_manager import MetadataManager
 from outputs.write_file import FileWriter
@@ -15,7 +16,7 @@ class DataProcessor:
         self.spark = spark
         self.dataframes = {}
         self.metadata = MetadataManager.get_metadata()
-        self.years_file = years_file  # Ruta al txt con la lista de años
+        self.years_file = years_file
 
     def run(self):
         try:
@@ -122,51 +123,92 @@ class DataProcessor:
         """
         1. Lee la lista de años desde self.years_file.
         2. Reemplaza {{ year }} en la ruta del JSON para cada año.
-        3. Si solo hay un año, retorna un DataFrame; si hay varios, retorna un dict {file_id: DataFrame}
-           (lectura en paralelo).
+        3. Devuelve un dict {file_id: DataFrame}.
+           - Decide secuencial vs. paralelo según la volumetría y el número de ficheros.
         """
         if not self.years_file:
             raise ValueError("READ: No se proporcionó 'years_file'; no se puede reemplazar {{ year }}.")
+
         with open(self.years_file, "r", encoding="utf-8") as f:
             years = [line.strip() for line in f if line.strip()]
 
-        path_template = inp["config"]["path"]  # por ejemplo: "C:/.../poblacion{{ year }}.csv"
+        path_template = inp["config"]["path"]
         fmt = inp["config"]["format"]
         spark_options = inp.get("spark_options", {})
         logger.info(f"READ: Años leídos desde '{self.years_file}': {years}.")
+
+        # Creamos la lista de rutas
         all_paths = []
         for y in years:
             actual_path = path_template.replace("{{ year }}", y)
             all_paths.append(actual_path)
-        logger.info(f"READ: Se generaron {len(all_paths)} rutas a partir del template.")
-        if len(all_paths) == 1:
-            single_path = all_paths[0]
-            logger.info(f"READ: Procesando único fichero: {single_path}.")
-            return self._read_single_file(single_path, fmt, spark_options)
 
-        # Hay varios años => procesamos en paralelo
+        logger.info(f"READ: Se generaron {len(all_paths)} rutas a partir del template: {all_paths}")
+
+        # Preparamos dict resultante
         result = {}
-        with ThreadPoolExecutor(max_workers=len(all_paths)) as executor:
-            future_map = {executor.submit(self._read_single_file, p, fmt, spark_options): p for p in all_paths}
-            for future in future_map:
-                path_done = future_map[future]
-                df = future.result()
 
-                # Usamos el nombre base del fichero como file_id
-                file_id = os.path.splitext(os.path.basename(path_done))[0]
+        # (1) Evaluamos la volumetría total (sumando tamaño de cada fichero) y el nº de ficheros
+        total_size = 0
+        for p in all_paths:
+            full_path = self._resolve_full_path(p)
+            if os.path.isfile(full_path):
+                total_size += os.path.getsize(full_path)
+        num_files = len(all_paths)
+
+        # Umbrales ejemplo: 500 MB y 5 ficheros
+        threshold_size = 500 * 1024 * 1024  # 500 MB
+        threshold_count = 5
+
+        # (2) Decidimos si leer en paralelo o no
+        use_parallel = (total_size > threshold_size) or (num_files > threshold_count)
+
+        if use_parallel and num_files > 1:
+            logger.info("READ: Se ha superado el umbral, leyendo ficheros en paralelo con ThreadPoolExecutor.")
+            max_workers = min(num_files, 4)  # Un límite razonable
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_path = {
+                    executor.submit(self._read_single_file, p, fmt, spark_options): p
+                    for p in all_paths
+                }
+                for future in as_completed(future_to_path):
+                    done_path = future_to_path[future]
+                    file_id = os.path.splitext(os.path.basename(done_path))[0]
+                    try:
+                        df = future.result()
+                        result[file_id] = df
+                        logger.info(f"READ: Finalizada lectura de '{done_path}' en paralelo.")
+                    except Exception as e:
+                        logger.error(f"READ: Error al leer '{done_path}': {e}", exc_info=True)
+                        raise
+        else:
+            logger.info("READ: Volumen pequeño o pocos ficheros, lectura secuencial.")
+            for p in all_paths:
+                file_id = os.path.splitext(os.path.basename(p))[0]
+                df = self._read_single_file(p, fmt, spark_options)
                 result[file_id] = df
+                logger.info(f"READ: Finalizada lectura secuencial de '{p}'.")
+
         return result
 
     def _read_single_file(self, path: str, fmt: str, spark_options: dict):
         logger.info(f"READ_SINGLE: Iniciando lectura del fichero: {path} (formato: {fmt}).")
-        if path.startswith("/"):
-            path = os.path.join(os.getcwd(), path.lstrip("/"))
-        else:
-            path = os.path.abspath(path)
+        full_path = self._resolve_full_path(path)
 
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"READ_SINGLE: No existe el fichero: {path}")
+        if not os.path.isfile(full_path):
+            raise FileNotFoundError(f"READ_SINGLE: No existe el fichero: {full_path}")
+
         reader = self.spark.read.format(fmt)
         for key, val in spark_options.items():
             reader = reader.option(key, val)
-        return reader.load(path)
+
+        # (Opcional) Podrías forzar un coalesce(1) si el dataset es muy pequeño, etc.
+        df = reader.load(full_path)
+        return df
+
+    def _resolve_full_path(self, path_str: str) -> str:
+        """Ayudante para normalizar la ruta, da soporte a paths absolutos o relativos."""
+        if path_str.startswith("/"):
+            return os.path.join(os.getcwd(), path_str.lstrip("/"))
+        else:
+            return os.path.abspath(path_str)
