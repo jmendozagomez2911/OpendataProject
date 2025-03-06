@@ -126,7 +126,7 @@ def test_data_quality(spark, yearEnd, metadata):
 
     # Calcular "Ambos_sexos" como Hombres + Mujeres
     df_final = df_final.withColumn("Ambos_sexos", F.col("Hombres") + F.col("Mujeres"))
-
+ 
     # Filtrar filas donde "Ambos_sexos" ≠ "Total_Ambos_Sexos"
     quality_issues_df = df_final.filter(F.col("Ambos_sexos") != F.col("Total_Ambos_Sexos"))
 
