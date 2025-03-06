@@ -69,8 +69,11 @@ class DeltaWriter:
              .merge(df.alias("source"), merge_condition)
              .whenMatchedUpdateAll()
              .whenNotMatchedInsertAll()
+             # .whenNotMatchedBySourceDelete()
              .execute())
             logger.info(f"{LOG_PREFIX} Merge realizado correctamente en '{self.delta_path}'.")
+
+            # Comando OPTIMIZE
             self._optimize_table()
         except Exception as e:
             logger.error(f"{LOG_PREFIX} Error en merge: {e}", exc_info=True)

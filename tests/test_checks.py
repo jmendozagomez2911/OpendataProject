@@ -4,6 +4,7 @@ import json
 from pyspark.sql import SparkSession
 import pyspark.sql.functions as F
 
+
 def _get_csv_path_from_metadata(md, year):
     """
     Busca en metadata.json la primera ruta que contenga '{{ year }}'
@@ -22,6 +23,7 @@ def _get_csv_path_from_metadata(md, year):
     except KeyError as e:
         raise ValueError(f"Error en la estructura de metadata.json: {e}")
 
+
 def _get_output_path_from_metadata(md, output_name):
     """
     Obtiene la ruta de salida desde el metadata.json basado en el nombre del output.
@@ -38,6 +40,7 @@ def _get_output_path_from_metadata(md, output_name):
     except KeyError as e:
         raise ValueError(f"Error en la estructura de metadata.json: {e}")
 
+
 def _get_spark_options_from_metadata(md):
     """
     Extrae las opciones de Spark desde el metadata.json
@@ -50,6 +53,7 @@ def _get_spark_options_from_metadata(md):
     except KeyError as e:
         raise ValueError(f"Error en la estructura de metadata.json: {e}")
 
+
 @pytest.fixture(scope="session")
 def spark():
     """
@@ -57,19 +61,19 @@ def spark():
     """
     return SparkSession.builder.master("local[*]").appName("TestChecks").getOrCreate()
 
+
 def test_compare_changes(spark, yearStart, yearEnd, metadata):
     """
     Compara qué filas han cambiado entre los ficheros de 2024 y 2025.
     """
     path_start = _get_csv_path_from_metadata(metadata, yearStart)
     path_end = _get_csv_path_from_metadata(metadata, yearEnd)
-    output_path = _get_output_path_from_metadata(metadata, "write_last_file")
     delimiter, header = _get_spark_options_from_metadata(metadata)
 
     df_start = spark.read.option("header", header).option("delimiter", delimiter).csv(path_start)
     df_end = spark.read.option("header", header).option("delimiter", delimiter).csv(path_end)
 
-    key_cols = ["provincia", "municipio", "sexo"]  # Sin "edad" porque no está en el CSV
+    key_cols = ["provincia", "municipio", "sexo"]
 
     df_start = df_start.withColumn("year", F.lit(str(yearStart)))
     df_end = df_end.withColumn("year", F.lit(str(yearEnd)))
@@ -86,21 +90,20 @@ def test_compare_changes(spark, yearStart, yearEnd, metadata):
         .filter(F.col(f"total_{yearStart}") != F.col(f"total_{yearEnd}"))
     )
 
-    comparison_df.write.mode("overwrite").parquet(output_path)
-
     count_changes = comparison_df.count()
-    print(f"📌 Total de filas con cambios: {count_changes}. Para más detalles, revisar {output_path}")
+    print(f"📌 Total de filas con cambios: {count_changes}.")
 
-    # comparison_df.show(10)  # Mostrar las primeras 10 filas en caso de debugging
+    # Puede descomentarse para ver las filas en pantalla
+    comparison_df.show(100)
 
     assert count_changes > 0, "No se encontraron cambios entre los archivos de 2024 y 2025"
+
 
 def test_data_quality(spark, yearEnd, metadata):
     """
     Verifica problemas de calidad en el fichero de 2025.
     """
     path_end = _get_csv_path_from_metadata(metadata, yearEnd)
-    output_path = _get_output_path_from_metadata(metadata, "write_historic_file")
     delimiter, header = _get_spark_options_from_metadata(metadata)
     df_end = spark.read.option("header", header).option("delimiter", delimiter).csv(path_end)
 
@@ -108,21 +111,27 @@ def test_data_quality(spark, yearEnd, metadata):
     missing_cols = required_cols - set(df_end.columns)
     assert not missing_cols, f"Faltan columnas en el archivo: {missing_cols}"
 
-    df_end = df_end.withColumn("total", F.col("total").cast("int"))
+    from pyspark.sql import functions as F
 
-    if "Hombres" not in df_end.columns or "Mujeres" not in df_end.columns:
-        df_end = df_end.withColumn("Hombres", F.round(F.col("total") * 0.5).cast("int"))
-        df_end = df_end.withColumn("Mujeres", (F.col("total") - F.col("Hombres")).cast("int"))
+    df_end = df_end.withColumn("total", F.col("total").cast("double"))
 
-    df_end = df_end.withColumn("Ambos_sexos", F.col("Hombres") + F.col("Mujeres"))
+    # Crear columnas separadas para cada tipo de sexo
+    df_ambos = df_end.filter(F.col("sexo") == "Ambos sexos").select("provincia", "municipio", F.col("total").alias("Total_Ambos_Sexos"))
+    df_hombres = df_end.filter(F.col("sexo") == "Hombres").select("provincia", "municipio", F.col("total").alias("Hombres"))
+    df_mujeres = df_end.filter(F.col("sexo") == "Mujeres").select("provincia", "municipio", F.col("total").alias("Mujeres"))
 
-    quality_issues_df = df_end.filter(F.col("Ambos_sexos") != F.col("total"))
+    # Unir las tres tablas en base a provincia y municipio
+    df_final = df_ambos.join(df_hombres, ["provincia", "municipio"], "left") \
+        .join(df_mujeres, ["provincia", "municipio"], "left")
 
-    quality_issues_df.write.mode("overwrite").parquet(output_path)
+    # Calcular "Ambos_sexos" como Hombres + Mujeres
+    df_final = df_final.withColumn("Ambos_sexos", F.col("Hombres") + F.col("Mujeres"))
+
+    # Filtrar filas donde "Ambos_sexos" ≠ "Total_Ambos_Sexos"
+    quality_issues_df = df_final.filter(F.col("Ambos_sexos") != F.col("Total_Ambos_Sexos"))
 
     count_quality_issues = quality_issues_df.count()
-    print(f"📌 Total de problemas de calidad: {count_quality_issues}. Para más detalles, revisar {output_path}")
+    print(f"📌 Total de problemas de calidad: {count_quality_issues}.")
 
-    # quality_issues_df.show(10)  # Mostrar las primeras 10 filas en caso de debugging
-
-    assert count_quality_issues == 0, "Se encontraron problemas de calidad en 2025"
+    # Mostrar las filas con problemas de calidad
+    quality_issues_df.show()

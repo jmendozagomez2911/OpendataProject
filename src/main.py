@@ -9,6 +9,15 @@ from metadata_manager import MetadataManager
 logger = LoggerManager.get_logger()
 
 
+def print_spark_resources(spark):
+    """Imprime los recursos utilizados por Spark."""
+    sc = spark.sparkContext
+    logger.info(f"Recursos de Spark:")
+    logger.info(f"- Aplicación: {spark.conf.get('spark.app.name', 'No configurado')}")
+    logger.info(f"- Master: {sc.master}")
+    logger.info(f"- Núcleos asignados: {sc.defaultParallelism}")
+
+
 def create_spark_session(app_name="LocalPipeline", master="local[*]"):
     builder = SparkSession.builder.appName(app_name).master(master)
     builder = (
@@ -35,6 +44,8 @@ def main():
         # 2) Crea la sesión de Spark
         spark = create_spark_session(master=args.master)
         logger.info("Sesión de Spark creada.")
+
+        print_spark_resources(spark)
 
         # 3) Instancia el DataProcessor pasando la ruta del years_file
         processor = DataProcessor(spark, years_file=args.years_file)

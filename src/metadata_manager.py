@@ -4,6 +4,7 @@ from utils.logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger()
 
+
 class MetadataManager:
     _instance = None
     _metadata = None

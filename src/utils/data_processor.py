@@ -59,9 +59,14 @@ class DataProcessor:
                 input_obj = self.dataframes[t_input]
                 if isinstance(input_obj, dict):
                     out_dict = {}
-                    for fid, df in input_obj.items():
-                        out_dict[fid] = self._apply_transformation(t_type, transf["config"], df)
-                        out_dict[fid].printSchema()
+                    # Ordenamos las claves (p.ej. "2024", "2025") para un procesamiento secuencial definido
+                    for fid in sorted(input_obj.keys()):
+                        df = input_obj[fid]
+                        logger.info(f"TRANSFORM: Procesando '{fid}' de '{t_input}' en orden ascendente.")
+                        transformed_df = self._apply_transformation(t_type, transf["config"], df)
+                        transformed_df.printSchema()
+                        out_dict[fid] = transformed_df
+
                     self.dataframes[t_name] = out_dict
                 else:
                     output_df = self._apply_transformation(t_type, transf["config"], input_obj)
@@ -88,7 +93,9 @@ class DataProcessor:
             try:
                 input_obj = self.dataframes[o_input]
                 if isinstance(input_obj, dict):
-                    for fid, df in input_obj.items():
+                    # De nuevo ordenamos las claves para escribir en orden (2024 antes que 2025, etc.)
+                    for fid in sorted(input_obj.keys()):
+                        df = input_obj[fid]
                         logger.info(f"OUTPUT: '{o_name}' [{fid}]: Esquema del DataFrame:")
                         df.printSchema()
 
@@ -202,7 +209,6 @@ class DataProcessor:
         for key, val in spark_options.items():
             reader = reader.option(key, val)
 
-        # (Opcional) Podrías forzar un coalesce(1) si el dataset es muy pequeño, etc.
         df = reader.load(full_path)
         return df
 
